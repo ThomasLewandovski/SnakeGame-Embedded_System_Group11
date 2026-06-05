@@ -262,7 +262,7 @@ void UI_PrintTempFixed(int temp_x10)
     lcd_set_cursor(40, 0);
 
     /*
-     * Print additional fixed demo/project information on the LCD.
+     * Print additional fixed project information on the LCD.
      */
     lcd_print("H:100 S:80 L:2");
 }
@@ -342,7 +342,7 @@ void UI_ShowStartupScreens(void)
     /*
      * Print a sequence of digits.
      *
-     * This can help demonstrate how many characters fit across the OLED.
+     * This can help show how many characters fit across the OLED.
      */
     OLED_PrintString("012345678901234567890");
 
@@ -352,9 +352,9 @@ void UI_ShowStartupScreens(void)
     OLED_SetCursor(3, 0);
 
     /*
-     * Print the project/demo description.
+     * Print the project description.
      */
-    OLED_PrintString("demo of mini project");
+    OLED_PrintString("Snake mini project");
 
     /*
      * Wait for 100 milliseconds.

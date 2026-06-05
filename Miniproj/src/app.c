@@ -8,6 +8,7 @@
 #include "../src/hfiles/snake_render.h"
 #include "../src/hfiles/temp_sensor.h"
 #include "../src/hfiles/timer_delay.h"
+#include "../src/hfiles/tilt_input.h"
 #include "../src/hfiles/utils.h"
 
 typedef enum
@@ -24,22 +25,29 @@ static SnakeGame game;
 static uint16_t high_score = 0U;
 static uint32_t last_step_ms = 0U;
 static uint32_t last_lcd_ms = 0U;
+static uint32_t last_tilt_ms = 0U;
 static uint8_t previous_buttons = 0U;
+static uint8_t debounced_buttons = 0U;
+static uint8_t last_raw_buttons = 0U;
 static uint8_t button_latch = 0U;
 static Direction queued_turn = DIR_NONE;
 static uint16_t last_lcd_score = 0xFFFFU;
 static int last_lcd_temp = -9999;
 static uint8_t last_lcd_temp_ready = 0xFFU;
 static uint8_t last_lcd_temp_error = 0xFFU;
+static uint32_t last_button_change_ms = 0U;
+static uint8_t tilt_control_enabled = 0U;
 
 #define BUTTON_K1_UP_MASK      0x01U
 #define BUTTON_K2_DOWN_MASK    0x02U
 #define BUTTON_K3_HASH_MASK    0x04U
 #define BUTTON_K4_STAR_MASK    0x08U
+#define BUTTON_DEBOUNCE_MS    25U
 #define APP_LOOP_DELAY_MS    1U
 #define LCD_UPDATE_PERIOD_MS 250U
+#define TILT_UPDATE_PERIOD_MS 20U
 
-static uint8_t App_ReadButtons(void)
+static uint8_t App_ReadRawButtons(void)
 {
     uint8_t buttons = 0U;
 
@@ -61,6 +69,33 @@ static uint8_t App_ReadButtons(void)
     }
 
     return buttons;
+}
+
+static void App_ScanButtons(void)
+{
+    uint8_t raw_buttons = App_ReadRawButtons();
+    uint8_t pressed_events;
+
+    if(raw_buttons != last_raw_buttons)
+    {
+        last_raw_buttons = raw_buttons;
+        last_button_change_ms = msTicks;
+        return;
+    }
+
+    if((uint32_t)(msTicks - last_button_change_ms) < BUTTON_DEBOUNCE_MS)
+    {
+        return;
+    }
+
+    if(raw_buttons == debounced_buttons)
+    {
+        return;
+    }
+
+    pressed_events = (uint8_t)(raw_buttons & (uint8_t)~debounced_buttons);
+    debounced_buttons = raw_buttons;
+    button_latch |= pressed_events;
 }
 
 static uint16_t App_CurrentScore(void)
@@ -205,8 +240,12 @@ static void App_ApplyDirectionInputs(uint8_t buttons)
 
 static uint8_t App_PauseCombo(uint8_t buttons)
 {
-    return (uint8_t)(((buttons & BUTTON_K3_HASH_MASK) != 0U) &&
-                     ((buttons & BUTTON_K4_STAR_MASK) != 0U));
+    uint8_t vertical_combo = (uint8_t)(((buttons & BUTTON_K1_UP_MASK) != 0U) &&
+                                       ((buttons & BUTTON_K2_DOWN_MASK) != 0U));
+    uint8_t horizontal_combo = (uint8_t)(((buttons & BUTTON_K3_HASH_MASK) != 0U) &&
+                                         ((buttons & BUTTON_K4_STAR_MASK) != 0U));
+
+    return (uint8_t)(vertical_combo || horizontal_combo);
 }
 
 static uint8_t App_PauseComboPressed(uint8_t buttons)
@@ -246,6 +285,8 @@ static void App_HandleMenu(void)
 
 static void App_HandleGame(uint8_t buttons)
 {
+    Direction tilt_direction;
+
     if(App_PauseComboPressed(buttons))
     {
         app_state = APP_PAUSE;
@@ -261,6 +302,14 @@ static void App_HandleGame(uint8_t buttons)
                                BUTTON_K2_DOWN_MASK |
                                BUTTON_K3_HASH_MASK |
                                BUTTON_K4_STAR_MASK);
+
+    if((tilt_control_enabled != 0U) &&
+       TiltInput_IsEnabled() &&
+       (TiltInput_GetStatus() == TILT_STATUS_READY))
+    {
+        tilt_direction = TiltInput_GetDirection();
+        App_ApplyDirection(tilt_direction);
+    }
 
     if((uint32_t)(msTicks - last_step_ms) >= Snake_GetStepPeriodMs(game.difficulty))
     {
@@ -336,20 +385,41 @@ void App_Init(void)
     Menu_Render(&menu, high_score);
 
     TempSensor_Init();
+    TempSensor_Enable();
+    TiltInput_Init();
+    if(tilt_control_enabled != 0U)
+    {
+        TiltInput_SetEnabled(1U);
+    }
+
+    last_raw_buttons = App_ReadRawButtons();
+    debounced_buttons = last_raw_buttons;
+    previous_buttons = debounced_buttons;
+    last_button_change_ms = msTicks;
 }
 
 void App_Run(void)
 {
     while(1)
     {
-        uint8_t buttons = App_ReadButtons();
+        uint8_t buttons;
+
+        App_ScanButtons();
+        buttons = debounced_buttons;
+        TempSensor_Service();
+
+        if((tilt_control_enabled != 0U) &&
+           ((uint32_t)(msTicks - last_tilt_ms) >= TILT_UPDATE_PERIOD_MS))
+        {
+            last_tilt_ms = msTicks;
+            TiltInput_Service();
+        }
+
         if((uint32_t)(msTicks - last_lcd_ms) >= LCD_UPDATE_PERIOD_MS)
         {
             last_lcd_ms = msTicks;
             App_RenderLcd(0U);
         }
-        button_latch |= buttons;
-
         if(app_state == APP_MENU)
         {
             App_HandleMenu();
@@ -370,4 +440,16 @@ void App_Run(void)
         previous_buttons = buttons;
         delayMs(APP_LOOP_DELAY_MS);
     }
+}
+
+void App_Main(void)
+{
+    App_MainWithTilt(0U);
+}
+
+void App_MainWithTilt(uint8_t enable_tilt_control)
+{
+    tilt_control_enabled = (enable_tilt_control != 0U) ? 1U : 0U;
+    App_Init();
+    App_Run();
 }

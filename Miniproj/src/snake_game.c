@@ -191,14 +191,14 @@ uint16_t Snake_GetStepPeriodMs(Difficulty difficulty)
 {
     if(difficulty == DIFFICULTY_EASY)
     {
-        return 1000U;
+        return 2500U;
     }
     if(difficulty == DIFFICULTY_NORMAL)
     {
-        return 160U;
+        return 1500U;
     }
 
-    return 100U;
+    return 500U;
 }
 
 const char *Snake_GetDifficultyName(Difficulty difficulty)

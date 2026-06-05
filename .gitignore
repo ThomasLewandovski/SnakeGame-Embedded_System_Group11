@@ -1,0 +1,9 @@
+# Keil/uVision generated files
+Miniproj/Objects/
+Miniproj/Listings/
+*.uvguix.*
+*.uvgui.*
+
+# Local editor/system files
+.DS_Store
+Thumbs.db

@@ -51,7 +51,7 @@ static void Render_GameFull(const SnakeGame *game)
     uint8_t x;
     uint8_t y;
 
-    Render_Line(0U, "Snake Game           ");
+    Render_Line(0U, "K1+K2 pause          ");
 
     for(x = 0U; x < (uint8_t)(SNAKE_GRID_WIDTH + 2U); x++)
     {
@@ -115,7 +115,7 @@ void Snake_RenderPause(const SnakeGame *game)
     OLED_SetCursor(3U, 42U);
     OLED_PrintString("PAUSE");
     OLED_SetCursor(4U, 18U);
-    OLED_PrintString("K3+K4 resume");
+    OLED_PrintString("K1+K2 resume");
 }
 
 void Snake_RenderGameOver(const SnakeGame *game)

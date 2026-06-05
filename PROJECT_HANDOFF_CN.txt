@@ -1,0 +1,358 @@
+﻿嵌入式贪吃蛇项目中文交接手册
+================================
+
+一、项目当前状态
+--------------------------------
+
+本项目是 EBU5477 Embedded Systems Design Mini-Project，目标是在 STM32F401RE NUCLEO 开发板上实现一个嵌入式贪吃蛇游戏。
+
+当前正式 Keil 工程文件是：
+
+    Miniproj/SnakeGame.uvprojx
+
+当前正式构建 Target 是：
+
+    SnakeGame_Release
+
+当前正式输出名是：
+
+    SnakeGame.axf
+    SnakeGame.hex
+
+
+二、硬件连接
+--------------------------------
+
+OLED 和 MPU6500 共用 I2C1：
+
+    SCL -> PB8
+    SDA -> PB9
+
+OLED 按键：
+
+    K1 -> PC8
+    K2 -> PC6
+    K3 -> PC5
+    K4 -> PC9
+
+温度传感器 DS1820 / DS18B20：
+
+    DQ -> PA1
+    DQ 与 3.3V 之间需要 4.7k 上拉电阻
+
+16x2 LCD：
+
+    RS -> PC7
+    E  -> PA9
+    D7 -> PA8
+    D6 -> PB10
+    D5 -> PB4
+    D4 -> PB5
+
+
+三、正式入口和倾斜测试入口
+--------------------------------
+
+正式默认入口文件：
+
+    Miniproj/src/main.c
+
+这个文件中只有一个正式 main()，调用：
+
+    App_Main();
+
+这表示默认运行稳定的按键控制版本，倾斜控制不开启。
+
+倾斜控制测试入口文件：
+0
+    Miniproj/src/main_tilt.c
+///0
+这个文件也有一个 main()，调用：
+
+    App_MainWithTilt(1U);
+
+注意：main_tilt.c 在 Keil 工程中默认设置为不参与构建。需要测试倾斜控制时，请在 Keil 中：
+
+    1. 打开 Miniproj/SnakeGame.uvprojx；
+    2. 左侧 Project 窗口中展开 SnakeGame_Release；
+    3. 展开 Entry 分组；
+    4. 找到 main.c，右键 main.c；
+    5. 点击 Options for File 'main.c'；
+    6. 勾选 Exclude from Build；
+    7. 找到 main_tilt.c，右键 main_tilt.c；
+    8. 点击 Options for File 'main_tilt.c'；
+    9. 取消勾选 Exclude from Build；
+    10. 重新 Build；
+    11. Download 到开发板。
+
+不要同时编译 main.c 和 main_tilt.c，因为两个文件都有 main()，同时启用会导致重复入口。
+
+切回普通按键版本时，反过来操作：
+
+    main.c       -> 不勾选 Exclude from Build，也就是参与构建
+    main_tilt.c  -> 勾选 Exclude from Build，也就是不参与构建
+
+
+四、当前有用的文件结构
+--------------------------------
+
+    Miniproj/SnakeGame.uvprojx
+        正式 Keil 工程文件。
+
+    Miniproj/SnakeGame.uvoptx
+        Keil 工程配置辅助文件。
+
+    Miniproj/src/main.c
+        正式默认入口。调用 App_Main()。
+
+    Miniproj/src/main_tilt.c
+        倾斜控制测试入口。调用 App_MainWithTilt(1U)，默认不参与构建。
+
+    Miniproj/src/app.c
+        当前最核心的应用层文件。负责系统初始化、主循环、状态机、按键扫描、LCD 更新、温度传感器 service、倾斜控制开关和游戏流程切换。
+
+    Miniproj/src/menu.c
+        OLED 菜单显示和难度切换。
+
+    Miniproj/src/snake_game.c
+        贪吃蛇游戏引擎，包括蛇移动、方向更新、食物生成、得分、增长、撞墙、撞自己。
+
+    Miniproj/src/snake_render.c
+        OLED 上的贪吃蛇画面渲染，包括游戏界面、暂停界面、游戏结束界面。
+
+    Miniproj/src/temp_sensor.c
+        DS1820 / DS18B20 温度传感器读取逻辑，已经做成非阻塞状态机。
+
+    Miniproj/src/mpu6500.c
+        MPU6500 底层 I2C 寄存器读写驱动。
+
+    Miniproj/src/tilt_input.c
+        倾斜控制封装模块，包括 MPU 在线检测、自动校准、滤波、死区判断和方向输出。
+
+    Miniproj/src/utils.c
+        工具函数，例如整数转字符串。
+
+    Miniproj/src/hfiles/
+        对应的头文件目录。
+
+    Miniproj/src/Libfiles/
+        外部库文件目录。目前包含 LCD 库和 ProjectSupport.lib。
+
+
+五、关键函数说明
+--------------------------------
+
+1. 应用入口相关
+
+    App_Main()
+        默认正式入口调用的应用函数。内部实际调用 App_MainWithTilt(0U)，表示不开启倾斜控制。
+
+    App_MainWithTilt(uint8_t enable_tilt_control)
+        带开关的应用入口。参数为 0 时关闭倾斜控制，参数非 0 时开启倾斜控制。
+
+    App_Init()
+        初始化 TIM2、DWT delay、按钮、LCD、I2C、OLED、菜单、温度传感器和倾斜输入模块。
+
+    App_Run()
+        主循环。负责扫描按键、服务温度传感器、按 20 ms 周期服务倾斜模块、更新 LCD、处理菜单/游戏/暂停/游戏结束状态。
+
+
+2. 按键相关
+
+    App_ScanButtons()
+        在 app.c 内部使用。读取 K1-K4 原始电平，进行 25 ms debounce，并把稳定按下事件写入 button_latch。
+
+    App_ConsumeButton(mask)
+        在菜单、暂停和游戏结束界面中消费一次按键事件，避免长按重复触发。
+
+    App_ApplyDirection(direction)
+        将方向输入写入蛇的 pending_direction 或 queued_turn，并阻止 180 度反向。
+
+当前按键映射：
+
+    K1 -> 上
+    K2 -> 下
+    K3 -> 右
+    K4 -> 左
+
+当前暂停/继续：
+
+    K1 + K2 暂停或继续
+    K3 + K4 也保留为备用暂停组合
+
+
+3. 游戏逻辑相关
+
+    Snake_Init(...)
+        初始化新游戏，包括蛇初始位置、长度、方向、分数和食物。
+
+    Snake_Update(...)
+        按当前方向移动蛇，检测吃食物、增长、撞墙、撞自己、游戏结束。
+
+    Snake_GetStepPeriodMs(...)
+        返回不同难度下蛇移动一格的时间。
+
+当前速度：
+
+    Easy   -> 2500 ms / 格
+    Normal -> 1500 ms / 格
+    Hard   -> 500 ms / 格
+
+
+4. OLED 渲染相关
+
+    Menu_Render(...)
+        渲染主菜单。
+
+    Snake_RenderGame(...)
+        渲染游戏画面。内部有 cell shadow，只更新变化的格子，减少刷新量。
+
+    Snake_RenderPause(...)
+        渲染暂停界面。
+
+    Snake_RenderGameOver(...)
+        渲染游戏结束界面。
+
+
+5. 温度传感器相关
+
+    TempSensor_Init()
+        初始化温度传感器状态。
+
+    TempSensor_Enable()
+        启用温度传感器读取。
+
+    TempSensor_Service()
+        非阻塞温度读取状态机。主循环中持续调用。
+
+    TempSensor_HasReading()
+        返回当前是否已有有效温度读数。
+
+    TempSensor_HasError()
+        返回当前是否出现温度读取错误。
+
+    TempSensor_GetTempX10()
+        返回温度值乘以 10。例如 253 表示 25.3 摄氏度。
+
+当前 LCD 第二行会显示温度：
+
+    Temp:xx.xC
+
+
+6. MPU6500 / 倾斜控制相关
+
+    MPU6500_Init()
+        唤醒 MPU6500，并配置基础加速度计和陀螺仪寄存器。
+
+    MPU6500_ReadWhoAmI()
+        读取 WHO_AM_I，用于判断传感器是否在线。
+
+    MPU6500_ReadAccelRaw(...)
+        读取加速度计 ax、ay、az 原始值。
+
+    TiltInput_Init()
+        初始化倾斜输入模块。
+
+    TiltInput_SetEnabled(uint8_t enabled)
+        开启或关闭倾斜输入。开启时会初始化 MPU6500、读取 WHO_AM_I，然后进入自动校准。
+
+    TiltInput_StartCalibration()
+        手动重新开始校准。
+
+    TiltInput_Service()
+        倾斜输入服务函数。建议 20 ms 调用一次。它会读取加速度、做校准、做滤波、做死区判断，并生成方向。
+
+    TiltInput_GetDirection()
+        返回当前倾斜方向，类型为 Direction。
+
+    TiltInput_GetStatus()
+        返回倾斜模块状态：
+            TILT_STATUS_OFF
+            TILT_STATUS_CALIBRATING
+            TILT_STATUS_READY
+            TILT_STATUS_ERROR
+
+    TiltInput_GetWhoAmI()
+        返回最近一次读取到的 WHO_AM_I。
+
+    TiltInput_GetFilteredX()
+    TiltInput_GetFilteredY()
+        返回滤波后的 X/Y 倾斜原始差值，可用于调试显示。
+
+
+六、当前功能怎么使用
+--------------------------------
+
+1. 默认按键控制版本
+
+打开 Keil 工程：
+
+    Miniproj/SnakeGame.uvprojx
+
+确认：
+
+    main.c 参与构建
+    main_tilt.c 不参与构建
+
+Build Target：
+
+    SnakeGame_Release
+
+下载到开发板后：
+
+    K1/K2 在菜单中切换难度
+    K3 开始游戏
+    游戏中 K1/K2/K3/K4 控制方向
+    游戏中 K1+K2 暂停
+    暂停时 K1+K2 继续
+    游戏结束后 K3 重新开始，K4 返回菜单
+
+
+2. 倾斜控制测试版本
+
+在 Keil 中：
+
+    main.c 设置为 Exclude from Build
+    main_tilt.c 设置为 Include in Build
+
+然后重新 Build 和 Download。
+
+启动后保持开发板水平静止大约 1 秒，因为 TiltInput 会采集 64 次样本作为校准 offset。
+
+校准完成后，游戏过程中 TiltInput 会把 MPU6500 加速度方向转换为蛇的方向输入。
+
+注意：由于 MPU6500 模块在硬件上的安装方向可能不同，如果发现向左倾斜却向右移动，需要调整 tilt_input.c 中方向映射：
+
+    current_direction = (filtered_x > 0) ? DIR_RIGHT : DIR_LEFT;
+    current_direction = (filtered_y > 0) ? DIR_DOWN : DIR_UP;
+
+可以根据实际板子方向互换 LEFT/RIGHT 或 UP/DOWN。
+
+
+七、不要提交的文件
+--------------------------------
+
+以下文件或目录是 Keil 自动生成或本地用户文件，不建议提交：
+
+    Miniproj/Objects/
+    Miniproj/Listings/
+    *.uvguix.*
+    *.uvgui.*
+    *.uvgui.*
+
+其中 *.uvguix.用户名 经常由 Keil 自动生成，里面是个人界面布局，不影响编译，不属于正式源码。
+
+
+八、后续建议
+--------------------------------
+
+1. 将 Tilt Mode 加入 OLED 菜单，允许用户选择 Button Mode 或 Tilt Mode。
+2. 增加 APP_CALIBRATION 状态，在 OLED 上显示校准提示。
+3. 增加 APP_SENSOR_MONITOR 状态，用 OLED/LCD 显示 WHO_AM_I、ax、ay、filtered_x、filtered_y、温度等调试信息。
+4. 在报告和视频中展示：
+       OLED 游戏画面
+       K1-K4 按键控制
+       温度显示
+       暂停/继续
+       MPU 校准和倾斜控制
+5. 最终提交前再次清理 Objects、Listings、*.uvguix.*。
